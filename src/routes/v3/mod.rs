@@ -8,6 +8,7 @@ pub mod collections;
 pub mod images;
 pub mod notifications;
 pub mod organizations;
+#[cfg(feature = "payment")]
 pub mod payouts;
 pub mod project_creation;
 pub mod projects;
@@ -24,26 +25,31 @@ pub mod versions;
 pub mod oauth_clients;
 
 pub fn config(cfg: &mut web::ServiceConfig) {
-    cfg.service(
-        web::scope("v3")
-            .wrap(default_cors())
-            .configure(analytics_get::config)
-            .configure(collections::config)
-            .configure(images::config)
-            .configure(notifications::config)
-            .configure(organizations::config)
-            .configure(project_creation::config)
-            .configure(projects::config)
-            .configure(reports::config)
-            .configure(statistics::config)
-            .configure(tags::config)
-            .configure(teams::config)
-            .configure(threads::config)
-            .configure(users::config)
-            .configure(version_file::config)
-            .configure(payouts::config)
-            .configure(versions::config),
-    );
+    #[allow(unused_mut)]
+    let mut scope = web::scope("v3")
+        .wrap(default_cors())
+        .configure(analytics_get::config)
+        .configure(collections::config)
+        .configure(images::config)
+        .configure(notifications::config)
+        .configure(organizations::config)
+        .configure(project_creation::config)
+        .configure(projects::config)
+        .configure(reports::config)
+        .configure(statistics::config)
+        .configure(tags::config)
+        .configure(teams::config)
+        .configure(threads::config)
+        .configure(users::config)
+        .configure(version_file::config)
+        .configure(versions::config);
+
+    #[cfg(feature = "payment")]
+    {
+        scope = scope.configure(payouts::config);
+    }
+
+    cfg.service(scope);
 }
 
 pub async fn hello_world() -> Result<HttpResponse, ApiError> {

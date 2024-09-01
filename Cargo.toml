@@ -112,8 +112,8 @@ rust_iso3166 = "0.1.11"
 
 jemallocator = {version = "0.5.4", optional = true}
 
-async-stripe = { version = "0.37.3", features = ["runtime-tokio-hyper-rustls"] }
-rusty-money = "0.4.1"
+async-stripe = { version = "0.37.3", features = ["runtime-tokio-hyper-rustls"], optional = true }
+rusty-money = { version = "0.4.1", optional = true }
 json-patch = "*"
 
 [dev-dependencies]
@@ -127,3 +127,4 @@ codegen-units = 16           # Higher number can improve compile times but reduc
 
 [features]
 jemalloc = ["jemallocator"]
+payment = ["rusty-money", "async-stripe"]

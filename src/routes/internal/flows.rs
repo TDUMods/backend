@@ -2159,6 +2159,7 @@ pub async fn set_email(
     redis: Data<RedisPool>,
     email: web::Json<SetEmail>,
     session_queue: Data<AuthQueue>,
+    #[cfg(feature = "payment")]
     stripe_client: Data<stripe::Client>,
 ) -> Result<HttpResponse, ApiError> {
     email
@@ -2200,20 +2201,23 @@ pub async fn set_email(
         )?;
     }
 
-    if let Some(customer_id) = user
-        .stripe_customer_id
-        .as_ref()
-        .and_then(|x| stripe::CustomerId::from_str(x).ok())
+    #[cfg(feature = "payment")]
     {
-        stripe::Customer::update(
-            &stripe_client,
-            &customer_id,
-            stripe::UpdateCustomer {
-                email: Some(&email.email),
-                ..Default::default()
-            },
-        )
-        .await?;
+        if let Some(customer_id) = user
+            .stripe_customer_id
+            .as_ref()
+            .and_then(|x| stripe::CustomerId::from_str(x).ok())
+        {
+            stripe::Customer::update(
+                &stripe_client,
+                &customer_id,
+                stripe::UpdateCustomer {
+                    email: Some(&email.email),
+                    ..Default::default()
+                },
+            )
+                .await?;
+        }
     }
 
     let flow = Flow::ConfirmEmail {

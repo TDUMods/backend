@@ -131,6 +131,7 @@ pub enum ApiError {
     NotFound,
     #[error("You are being rate-limited. Please wait {0} milliseconds. 0/{1} remaining.")]
     RateLimitError(u128, u32),
+    #[cfg(feature = "payment")]
     #[error("Error while interacting with payment processor: {0}")]
     Stripe(#[from] stripe::StripeError),
 }
@@ -165,6 +166,7 @@ impl ApiError {
                 ApiError::Zip(..) => "zip_error",
                 ApiError::Io(..) => "io_error",
                 ApiError::RateLimitError(..) => "ratelimit_error",
+                #[cfg(feature = "payment")]
                 ApiError::Stripe(..) => "stripe_error",
             },
             description: self.to_string(),
@@ -201,6 +203,7 @@ impl actix_web::ResponseError for ApiError {
             ApiError::Zip(..) => StatusCode::BAD_REQUEST,
             ApiError::Io(..) => StatusCode::BAD_REQUEST,
             ApiError::RateLimitError(..) => StatusCode::TOO_MANY_REQUESTS,
+            #[cfg(feature = "payment")]
             ApiError::Stripe(..) => StatusCode::FAILED_DEPENDENCY,
         }
     }

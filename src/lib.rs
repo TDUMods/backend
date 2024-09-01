@@ -6,10 +6,15 @@ use actix_web::web;
 use database::redis::RedisPool;
 use log::{info, warn};
 use queue::{
-    analytics::AnalyticsQueue, payouts::PayoutsQueue, session::AuthQueue, socket::ActiveSockets,
+    analytics::AnalyticsQueue, session::AuthQueue, socket::ActiveSockets,
 };
-use sqlx::Postgres;
+use sqlx::{Pool, Postgres};
 use tokio::sync::RwLock;
+
+#[cfg(feature = "payment")]
+use queue::payouts::PayoutsQueue;
+#[cfg(feature = "payment")]
+use queue::payouts::process_payout;
 
 extern crate clickhouse as clickhouse_crate;
 use clickhouse_crate::Client;
@@ -20,7 +25,6 @@ use util::cors::default_cors;
 use crate::queue::moderation::AutomatedModerationQueue;
 use crate::util::ratelimit::KeyedRateLimiter;
 use crate::{
-    queue::payouts::process_payout,
     search::indexing::index_projects,
     util::env::{parse_strings_from_var, parse_var},
 };
@@ -53,12 +57,14 @@ pub struct LabrinthConfig {
     pub ip_salt: Pepper,
     pub search_config: search::SearchConfig,
     pub session_queue: web::Data<AuthQueue>,
-    pub payouts_queue: web::Data<PayoutsQueue>,
     pub analytics_queue: Arc<AnalyticsQueue>,
     pub active_sockets: web::Data<RwLock<ActiveSockets>>,
     pub automated_moderation_queue: web::Data<AutomatedModerationQueue>,
     pub rate_limiter: KeyedRateLimiter,
+    #[cfg(feature = "payment")]
     pub stripe_client: stripe::Client,
+    #[cfg(feature = "payment")]
+    pub payouts_queue: web::Data<PayoutsQueue>,
 }
 
 pub fn app_setup(
@@ -240,6 +246,7 @@ pub fn app_setup(
         });
     }
 
+    #[cfg(feature = "payment")]
     {
         let pool_ref = pool.clone();
         let redis_ref = redis_pool.clone();
@@ -260,27 +267,15 @@ pub fn app_setup(
         });
     }
 
-    let stripe_client = stripe::Client::new(dotenvy::var("STRIPE_API_KEY").unwrap());
-    {
-        let pool_ref = pool.clone();
-        let redis_ref = redis_pool.clone();
-        let stripe_client_ref = stripe_client.clone();
-
-        actix_rt::spawn(async move {
-            routes::internal::billing::task(stripe_client_ref, pool_ref, redis_ref).await;
-        });
-    }
-
     let ip_salt = Pepper {
         pepper: models::ids::Base62Id(models::ids::random_base62(11)).to_string(),
     };
 
-    let payouts_queue = web::Data::new(PayoutsQueue::new());
     let active_sockets = web::Data::new(RwLock::new(ActiveSockets::default()));
 
     LabrinthConfig {
-        pool,
-        redis_pool,
+        pool: pool.clone(),
+        redis_pool: redis_pool.clone(),
         clickhouse: clickhouse.clone(),
         file_host,
         maxmind,
@@ -288,13 +283,28 @@ pub fn app_setup(
         ip_salt,
         search_config,
         session_queue,
-        payouts_queue,
         analytics_queue,
         active_sockets,
         automated_moderation_queue,
         rate_limiter: limiter,
-        stripe_client,
+        #[cfg(feature = "payment")]
+        stripe_client: build_stripe_client(pool, redis_pool),
+        #[cfg(feature = "payment")]
+        payouts_queue: web::Data::new(PayoutsQueue::new()),
     }
+}
+
+#[cfg(feature = "payment")]
+fn build_stripe_client(pool: Pool<Postgres>, redis_pool: RedisPool) -> stripe::Client {
+    let stripe_client = stripe::Client::new(dotenvy::var("STRIPE_API_KEY").unwrap());
+    {
+        let stripe_client_ref = stripe_client.clone();
+
+        actix_rt::spawn(async move {
+            routes::internal::billing::task(stripe_client_ref, pool, redis_pool).await;
+        });
+    }
+    stripe_client
 }
 
 pub fn app_config(cfg: &mut web::ServiceConfig, labrinth_config: LabrinthConfig) {
@@ -319,19 +329,24 @@ pub fn app_config(cfg: &mut web::ServiceConfig, labrinth_config: LabrinthConfig)
     .app_data(web::Data::new(labrinth_config.file_host.clone()))
     .app_data(web::Data::new(labrinth_config.search_config.clone()))
     .app_data(labrinth_config.session_queue.clone())
-    .app_data(labrinth_config.payouts_queue.clone())
     .app_data(web::Data::new(labrinth_config.ip_salt.clone()))
     .app_data(web::Data::new(labrinth_config.analytics_queue.clone()))
     .app_data(web::Data::new(labrinth_config.clickhouse.clone()))
     .app_data(web::Data::new(labrinth_config.maxmind.clone()))
     .app_data(labrinth_config.active_sockets.clone())
     .app_data(labrinth_config.automated_moderation_queue.clone())
-    .app_data(web::Data::new(labrinth_config.stripe_client.clone()))
     .configure(routes::v2::config)
     .configure(routes::v3::config)
     .configure(routes::internal::config)
     .configure(routes::root_config)
     .default_service(web::get().wrap(default_cors()).to(routes::not_found));
+
+    #[cfg(feature = "payment")]
+    {
+        cfg
+            .app_data(web::Data::new(labrinth_config.stripe_client.clone()))
+            .app_data(labrinth_config.payouts_queue.clone());
+    }
 }
 
 // This is so that env vars not used immediately don't panic at runtime
