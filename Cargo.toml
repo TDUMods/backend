@@ -125,6 +125,11 @@ lto = false                  # Disables Link Time Optimization
 incremental = true           # Enables incremental compilation
 codegen-units = 16           # Higher number can improve compile times but reduce runtime performance
 
+[profile.release]
+opt-level = 3                # Maximum optimization, improves runtime performance
+lto = "fat"                  # Link Time Optimization, even across crates
+codegen-units = 1            # Lower number can improve compile times but reduce runtime performance
+
 [features]
 jemalloc = ["jemallocator"]
 payment = ["rusty-money", "async-stripe"]
